@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.StaySafe" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Customize colors, fonts, etc here -->
+    </style>
+</resources>

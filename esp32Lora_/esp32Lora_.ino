@@ -6,16 +6,13 @@
 #include <freertos/task.h>
 #include <freertos/queue.h>
 
-// ── Pin config ─────────────────────────────────────────────────
 #define NSS   5
 #define RESET 14
 #define DIO0  2
 
-// ── Credentials ────────────────────────────────────────────────
-const char SSID[] = "HUAWEI-2.4G-P4Wx";
-const char PASS[] = "Z85Eq6b4";
+const char SSID[] = "000000";
+const char PASS[] = "00000";
 
-// ── MQTT message struct ─────────────────────────────────────────
 struct MqttMsg {
     char topic[32];
     char payload[16];
@@ -25,7 +22,6 @@ static QueueHandle_t msgQueue;
 static WiFiClient    net;
 static MQTTClient    mqttClient;
 
-// ── Helper: enqueue without blocking LoRa task ─────────────────
 static inline void enqueue(const char* topic, const char* payload) {
     MqttMsg m;
     strlcpy(m.topic,   topic,   sizeof(m.topic));
@@ -35,7 +31,6 @@ static inline void enqueue(const char* topic, const char* payload) {
     }
 }
 
-// ── Alert level → string helpers ───────────────────────────────
 static const char* alertToState(int lvl) {
     if (lvl == 2) return "DANGER";
     if (lvl == 1) return "WARNING";   // ← was missing in practice
@@ -48,14 +43,11 @@ static const char* alertToWater(int lvl) {
 }
 static const char* rainToStr(int cat) {
     if (cat == 2) return "HEAVY";
-    if (cat == 1) return "LIGHT";     // ← was missing in practice
+    if (cat == 1) return "LIGHT";     
     return "NONE";
 }
 
-// ══════════════════════════════════════════════════════════════
-// TASK 1 — LoRa RX  (Core 1)
-// Polls every 2 ms instead of 10 ms — 5× faster response.
-// ══════════════════════════════════════════════════════════════
+
 static void taskLoRa(void* /*param*/) {
     SPI.begin();
     LoRa.setPins(NSS, RESET, DIO0);
@@ -76,7 +68,6 @@ static void taskLoRa(void* /*param*/) {
             continue;
         }
 
-        // Read full packet into buffer
         char buf[128] = {};
         int  i = 0;
         while (LoRa.available() && i < (int)sizeof(buf) - 1) {
@@ -84,7 +75,6 @@ static void taskLoRa(void* /*param*/) {
         }
         Serial.printf("[LoRa] RX(%d): %s\n", pktSize, buf);
 
-        // ── ALERT packet  e.g. "ALERT:0" "ALERT:1" "ALERT:2" ──
         if (strncmp(buf, "ALERT:", 6) == 0) {
             int lvl = atoi(buf + 6);                   // 0, 1, or 2
             enqueue("safty/state",      alertToState(lvl));
@@ -93,7 +83,6 @@ static void taskLoRa(void* /*param*/) {
                           lvl, alertToState(lvl), alertToWater(lvl));
         }
 
-        // ── DATA packet  e.g. "D:...A:1...RF:2..." ─────────────
         else if (strncmp(buf, "D:", 2) == 0) {
             char* aPtr  = strstr(buf, "A:");
             char* rfPtr = strstr(buf, "RF:");
@@ -111,21 +100,15 @@ static void taskLoRa(void* /*param*/) {
                           alertToWater(alertLvl),
                           rainToStr(rainCat));
         }
-        // No vTaskDelay here — immediately re-poll for next packet
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-// TASK 2 — MQTT / WiFi  (Core 0)
-// Drains queue with 0 ms timeout so mqttClient.loop() runs
-// as fast as possible between publishes.
-// ══════════════════════════════════════════════════════════════
+
 static void taskMqtt(void* /*param*/) {
     WiFi.mode(WIFI_STA);
     WiFi.begin(SSID, PASS);
     mqttClient.begin("mqtt-dashboard.com", 1883, net);
 
-    // Blocking only at startup — tasks aren't time-critical yet
     Serial.print("[WiFi] Connecting");
     while (WiFi.status() != WL_CONNECTED) {
         Serial.print('.');
@@ -144,7 +127,7 @@ static void taskMqtt(void* /*param*/) {
     for (;;) {
         uint32_t now = millis();
 
-        // ── Keep-alive check every 5 s (non-blocking) ──────────
+       
         if (now - lastReconnect > 5000) {
             lastReconnect = now;
 
@@ -158,12 +141,9 @@ static void taskMqtt(void* /*param*/) {
             }
         }
 
-        // ── Drive MQTT heartbeat ────────────────────────────────
         mqttClient.loop();
 
-        // ── Drain ALL queued messages without blocking ──────────
-        // Timeout 0: if queue empty, fall through immediately
-        // so mqttClient.loop() keeps getting called every iteration.
+      
         MqttMsg m;
         while (xQueueReceive(msgQueue, &m, 0) == pdTRUE) {
             if (mqttClient.connected()) {
@@ -173,15 +153,10 @@ static void taskMqtt(void* /*param*/) {
             mqttClient.loop(); // keep TCP stack alive between publishes
         }
 
-        // Yield only when queue is empty — 5 ms keeps CPU free
-        // but doesn't add latency when packets are arriving fast.
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
-// ══════════════════════════════════════════════════════════════
-// setup / loop
-// ══════════════════════════════════════════════════════════════
 void setup() {
     Serial.begin(115200);
 
@@ -193,5 +168,5 @@ void setup() {
 }
 
 void loop() {
-    vTaskDelay(portMAX_DELAY); // nothing here — RTOS tasks own everything
+    vTaskDelay(portMAX_DELAY); 
 }

@@ -215,7 +215,7 @@ Active 30s → STOP 10min → Active 30s → STOP 10min → ...
 **Sleep entry sequence:**
 ```c
 HAL_RTCEx_DeactivateWakeUpTimer(&hrtc);
-SetRtcWakeup_ms(SLEEP_DURATION_MS);          // 10 minutes
+SetRtcWakeup_ms(SLEEP_DURATION_MS);          
 __HAL_RTC_WAKEUPTIMER_EXTI_ENABLE_IT();
 HAL_SuspendTick();
 HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
@@ -373,8 +373,8 @@ StaySafe-Project/
 │   │   └── i2c_lcd/                # HD44780 I2C driver
 │   └── ...
 ├── ESP32/
-│   └── esp32_gateway/
-│       └── esp32_gateway.ino       # Dual-core LoRa+MQTT gateway
+│   └── esp32Lora/
+│       └── esp32Lora.ino       # Dual-core LoRa+MQTT gateway
 └── Android/
     └── app/src/main/
         ├── java/com/example/staysafe/

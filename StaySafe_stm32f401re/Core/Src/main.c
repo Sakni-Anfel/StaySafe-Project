@@ -227,17 +227,25 @@ int main(void)
   HAL_Delay(1000);
 
   uint8_t version = SX1278_SPIRead(&SX1278, 0x42);
-  if (version == 0x12) {
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-  HAL_Delay(1000);
-  	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-  HAL_Delay(1000);
-  } else {
-         HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_SET);
-  	HAL_Delay(500);
-  	       HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_RESET);
-
+    if (version != 0x12)
+  {   HAL_UART_Transmit(&huart2, (uint8_t*)"LORA FAIL-RETRY\n", 16, 100);
+      SX1278_hw_Reset(&SX1278_hw);
+           HAL_Delay(500);
+      SX1278_init(&SX1278, 433000000, SX1278_POWER_11DBM, SX1278_LORA_SF_7, SX1278_LORA_BW_125KHZ, SX1278_LORA_CR_4_5, SX1278_LORA_CRC_EN, 16);
+      HAL_Delay(500);
+        version = SX1278_SPIRead(&SX1278, 0x42);
+      if (version != 0x12)//0x12
+      {
+         
+    HAL_UART_Transmit(&huart2, (uint8_t*)"LORA DEAD-RESET\n", 16, 100);
+          HAL_Delay(100);
+      NVIC_SystemReset();
+      }
   }
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
+ 		 HAL_Delay(1000);
+ 	 HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
+  HAL_Delay(1000);
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -834,16 +842,7 @@ void LoraTaskFunction(void *argument)
   /* Infinite loop */
   for(;;)
   {
-	  		//message_alert=xQueueReceive(QueueAlertHandle,&alert,0);
-	/*  xQueueSend(QueueAlertHandle, &alertLevel, pdMS_TO_TICKS(10));
-	  		if (message_alert == pdPASS){
-	  			  	message_al=snprintf(txalertBuffer, sizeof(txBuffer),"A:%d",alert);
-	  			  		ret = SX1278_LoRaEntryTx(&SX1278,message_al, 2000);
-	  			  		 if (ret == 1) {
-	  			  				ret= SX1278_LoRaTxPacket(&SX1278,(uint8_t*)txalertBuffer, message_al, 2000);
-	  			  			 printf(ret == 1 ? "alert sent\r\n" : "alert failed\r\n");
-	  			  	}
-	  			  		}*/
+	  		
 	  	  message = xQueueReceive(QueueDataHandle,&receivemessage, pdMS_TO_TICKS(500));
 
 	  		if(message == pdPASS){
@@ -857,17 +856,39 @@ void LoraTaskFunction(void *argument)
 	  			    receivemessage.alertLevel,
 	  			    receivemessage.rainCategory); // rainCategory = 0=NONE, 1=LIGHT, 2=HEAVY
 
-	  			ret = SX1278_LoRaEntryTx(&SX1278,message_lenght, 2000);
+	  			  uint8_t lora_retries = 0;
+            uint8_t sent         = 0;
 
-	      if (ret == 1) {
-	  				ret= SX1278_LoRaTxPacket(&SX1278,(uint8_t*)txBuffer, message_lenght, 2000);
-	          if(ret==1){
-	  					HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
-	  					HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_RESET);
-	      } else {
-	          HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_RESET);
-	          HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, GPIO_PIN_SET);
-	      }}
+            while (lora_retries < 3 && !sent)
+            {
+                if (lora_retries == 2)
+                {
+                
+                    HAL_UART_Transmit(&huart2, (uint8_t*)"LORA REINIT\n", 12, 50);
+                    	SX1278_hw_Reset(&SX1278_hw);
+                    vTaskDelay(pdMS_TO_TICKS(100));
+                    	SX1278_init(&SX1278, 433000000, SX1278_POWER_11DBM, SX1278_LORA_SF_7, SX1278_LORA_BW_125KHZ, SX1278_LORA_CR_4_5, SX1278_LORA_CRC_EN, 16);
+                    vTaskDelay(pdMS_TO_TICKS(200));
+                }
+
+                ret = SX1278_LoRaEntryTx(&SX1278, message_lenght, 2000);
+                if (ret == 1) {
+                    ret = SX1278_LoRaTxPacket(&SX1278, (uint8_t*)txBuffer, message_lenght, 2000);
+                    if (ret == 1) { sent = 1; break; }
+                }
+
+                lora_retries++;
+                vTaskDelay(pdMS_TO_TICKS(500));
+            }
+
+           
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, sent ? GPIO_PIN_SET  : GPIO_PIN_RESET);
+            HAL_GPIO_WritePin(GPIOC, GPIO_PIN_1, sent ? GPIO_PIN_RESET : GPIO_PIN_SET);
+
+            if (!sent) {
+                HAL_UART_Transmit(&huart2, (uint8_t*)"LORA TX FAILED\n", 15, 100);
+            }
+        }
 
 
 
@@ -936,18 +957,20 @@ void readingSensorFunction(void *argument)
 	              samples[j+1] = key;
 	          }
 
-	          /* Use median (or mean of middle values if ≥3 valid) */
+	    
 	          if (valid_count >= 3) {
-	              float sum = 0;
-	              for (int i = 1; i < valid_count - 1; i++) sum += samples[i];
-	              data.distancecm = sum / (valid_count - 2);
-	          } else if (valid_count > 0) {
-	              float sum = 0;
-	              for (int i = 0; i < valid_count; i++) sum += samples[i];
-	              data.distancecm = sum / valid_count;
-	          } else {
-	              data.distancecm = 0.0f;
-	          }
+            float sum = 0;
+            for (int i = 1; i < valid_count - 1; i++) sum += samples[i];
+            data.distancecm = sum / (valid_count - 2);
+        } else if (valid_count > 0) {
+            float sum = 0;
+            for (int i = 0; i < valid_count; i++) sum += samples[i];
+            data.distancecm = sum / valid_count;
+        } else {
+            /* No valid reading: sentinel, skip alert */
+            data.distancecm = 999.0f;
+            HAL_UART_Transmit(&huart2, (uint8_t*)"SENSOR FAIL\n", 12, 50);
+        }
 
 
 
@@ -1023,12 +1046,10 @@ void readingSensorFunction(void *argument)
 	          ALL_DONE_BITS,
 	          pdTRUE,
 	          pdTRUE,
-	          pdMS_TO_TICKS(5000)   // 5s max — si LoRa freeze, on dort quand même
+	          pdMS_TO_TICKS(5000)   
 	      );
-	              // Wait for tasks to be done before sleeping (already waited above,
-	              // but check result to be safe)
+	             
 	    if ((finalBits & ALL_DONE_BITS) != ALL_DONE_BITS) {
-	          // LoRa ou LCD n'a pas fini — log et on continue quand même
 	          char warn[40];
 	          int wlen = snprintf(warn, sizeof(warn), "WARN bits=0x%02lX forcing sleep\n",
 	                              (unsigned long)finalBits);
@@ -1143,11 +1164,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
+	 __disable_irq();
+    HAL_UART_Transmit(&huart2, (uint8_t*)"FATAL-RESET\n", 12, 200);
+    HAL_Delay(200);
+    NVIC_SystemReset();
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+  
   /* USER CODE END Error_Handler_Debug */
 }
 
